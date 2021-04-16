@@ -1,5 +1,6 @@
 from opentrons import protocol_api
 from covmatic_stations.station import Station, labware_loader, instrument_loader
+from covmatic_stations.utils import uniform_divide
 from typing import Optional, Tuple
 import logging
 import math
@@ -19,9 +20,10 @@ class BioerMastermixPrep(Station):
             drop_threshold: int = 296,
             jupyter: bool = True,
             logger: Optional[logging.getLoggerClass()] = None,
-            mastermix_vol: float = 12,
+            mastermix_vol: float = 20,
             mastermix_vol_headroom: float = 1.2,
             mastermix_vol_headroom_aspirate: float = 20 / 18,
+            mm_strip_capacity: float = 180,
             metadata: Optional[dict] = None,
             num_samples: int = 96,
             positive_control_well: str = 'A10',
@@ -40,6 +42,7 @@ class BioerMastermixPrep(Station):
             tipracks_slots: Tuple[str, ...] = ('2', '3', '5', '6', '8', '9', '11'),
             transfer_samples: bool = True,
             tube_block_model: str = "opentrons_24_aluminumblock_nest_1.5ml_snapcap",
+            tube_max_volume: float = 1500,
             ** kwargs
 
         ):
@@ -94,6 +97,7 @@ class BioerMastermixPrep(Station):
         self._mastermix_vol = mastermix_vol
         self._mastermix_vol_headroom = mastermix_vol_headroom
         self._mastermix_vol_headroom_aspirate = mastermix_vol_headroom_aspirate
+        self._mm_strips_capacity = mm_strip_capacity
         self._positive_control_well = positive_control_well
         self._sample_blow_height = sample_blow_height
         self._sample_bottom_height = sample_bottom_height
@@ -108,6 +112,7 @@ class BioerMastermixPrep(Station):
         self._tipracks_slots = tipracks_slots
         self._transfer_samples = transfer_samples
         self._tube_block_model = tube_block_model
+        self._tube_max_volume = tube_max_volume
 
         self._remaining_samples = self._num_samples
         self._samples_this_cycle = min(self._remaining_samples, self._samples_per_cycle)
@@ -160,8 +165,29 @@ class BioerMastermixPrep(Station):
             "_tips20": "_m20"
         }
 
+    @property
+    def mm_strip(self):
+        # We use only one column
+        return self._mm_strips.columns()[0]
+
     def body(self):
         self.logger.info("Bioer protocol started!")
+        num_cols = math.ceil(self._num_samples / 8)
+
+        self.logger.info("Samples: {}".format(self._num_samples))
+
+        total_volume = self._mastermix_vol * self._num_samples * self._mastermix_vol_headroom
+        self.logger.info("For this run we need a total of {}ul of mastermix".format(total_volume))
+
+
+        num_tubes, vol_per_tube = uniform_divide(total_volume, self._tube_max_volume)
+        self.logger.info("We need {} tubes with {}ul of mastermix each.".format(num_tubes, vol_per_tube))
+
+
+
+        # sample_dests = pcr_plate.rows()[0][NUM_COLONNA:num_cols + NUM_COLONNA]
+        # control_dest1 = pcr_plate.wells()[88]  # controlli in posizione A12 e H12
+        # control_dest2 = pcr_plate.wells()[95]
 
 if __name__ == "__main__":
-    BioerMastermixPrep(num_samples=1, metadata={'apiLevel': '2.3'}).simulate()
+    BioerMastermixPrep(num_samples=50, metadata={'apiLevel': '2.3'}).simulate()
