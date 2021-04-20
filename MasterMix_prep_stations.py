@@ -175,6 +175,10 @@ class BioerMastermixPrep(Station):
         return self._pcr_plate.rows()[0][:self.num_cols]
 
     @property
+    def sample_dests_wells(self):
+        return self._pcr_plate.wells()[:self.num_cols*8]
+
+    @property
     def remaining_cols(self):
         return self.num_cols - self._done_cols
 
@@ -194,78 +198,34 @@ class BioerMastermixPrep(Station):
         return self._mastermix_vol_headroom
 
     @property
-    def control_dests(self):
+    def control_dests_wells(self):
         return [self._pcr_plate.wells_by_name()[i] for i in [self._positive_control_well, self._negative_control_well]]  # controlli in posizione A12 e H12
 
-    # @property
-    # def controls_already_done(self) -> bool:
-    #     return all(c in self.sample_dests.wells_by_name() for c in self.control_dests)
+    @property
+    def controls_already_done(self) -> bool:
+        print("Checking controls if already done")
+        r = self.sample_dests_wells
 
-    def body(self):
-        self.logger.info("Bioer protocol started!")
-        # num_cols = math.ceil(self._num_samples / 8)
+        ret = True
+        for c in self.control_dests_wells:
+            print(c)
+            print(ret)
+        return True
 
-        self.logger.info("Samples: {}".format(self._num_samples))
+    def is_well_in_samples(self, well):
+        """
+        Function that check if a well is within the samples well.
+        :param well: well to check
+        :return: True if the well is included in the samples list.
+        """
+        return well in self.sample_dests_wells
 
-        volume_for_controls = len(self.control_dests) * self._mastermix_vol
-        volume_to_distribute_to_pcr_plate = self._mastermix_vol * self.num_cols * 8
-        volume_to_distribute_to_strip = volume_to_distribute_to_pcr_plate * self.headroom_from_strip_to_pcr + volume_for_controls
-        total_volume = volume_to_distribute_to_pcr_plate * self.headroom_from_tubes_to_strip
-        self.logger.info("For this run we need a total of {}ul of mastermix".format(total_volume))
-        self.logger.info("{}ul will be dispensed to strips".format(volume_to_distribute_to_strip))
-        self.logger.info("{}ul will be dispensed to control positions.".format(volume_for_controls))
-
-        num_tubes, vol_per_tube = uniform_divide(total_volume, self._tube_max_volume)
-        self.logger.info("We need {} tubes with {}ul of mastermix each.".format(num_tubes, vol_per_tube))
-
-        mm_tubes = self._tube_block.wells()[:num_tubes]
-
-        samples_per_mm_tube = []
-        for i in range(num_tubes):
-            remaining_samples = self._num_samples - sum(samples_per_mm_tube)
-            self.logger.info("Remaining samples: {}".format(remaining_samples))
-            samples_per_mm_tube.append(
-                min(8 * math.ceil(remaining_samples / (8 * (num_tubes - i))), remaining_samples))
-            self.logger.info("samples_per_mm_tube: {}".format(samples_per_mm_tube))
-
-        for (t, v) in zip(mm_tubes, samples_per_mm_tube):
-            self.logger.info("Load {} tube with {}ul; used for {} samples".format(t, vol_per_tube, v))
-
-        self._source_tubes_and_vol = []
-        for source in mm_tubes:
-            available_volume = volume_to_distribute_to_strip/len(mm_tubes)
-            assert total_volume > available_volume, \
-                "Error in volume calcuations: available {}ul while requested {}ul".format(available_volume, vol_per_tube)
-            self._source_tubes_and_vol.append(dict(source=source,
-                                                   available_volume=available_volume))
-
-        self.fill_controls()
-        while self.remaining_cols > 0:
-            # calcuations for filling strip each time
-            self.logger.info("\nRemaining cols: {}".format(self.remaining_cols))
-            strip_volume = min(self._mm_strips_capacity,
-                                    self.remaining_cols * self._mastermix_vol * self.headroom_from_strip_to_pcr)
-            samples_per_this_strip = strip_volume // (self._mastermix_vol * self.headroom_from_strip_to_pcr)
-            self.logger.info("using that strip for {} samples".format(samples_per_this_strip))
-
-            strip_fill_volume = samples_per_this_strip * self._mastermix_vol * self.headroom_from_strip_to_pcr
-            self.logger.info("Filling strip with {}ul".format(strip_fill_volume))
-
-            self.fill_strip(strip_fill_volume)
-            self.transfer_to_pcr_plate_and_mark_done(samples_per_this_strip)
-
-        print("Remaining vols: {}".format(self._source_tubes_and_vol))
-
-        # # Fill strip
-        # if not self._p300.has_tip():
-        #     self.pick_up(self._p300)
-
-
-
-
-        # sample_dests = pcr_plate.rows()[0][NUM_COLONNA:num_cols + NUM_COLONNA]
-        # control_dest1 = pcr_plate.wells()[88]  # controlli in posizione A12 e H12
-        # control_dest2 = pcr_plate.wells()[95]
+    @property
+    def control_wells_not_in_samples(self):
+        """
+        :return: a list of wells for controls that are not already filled with the 8-channel pipette
+        """
+        return [c for c in self.control_dests_wells if not self.is_well_in_samples(c)]
 
     def fill_strip(self, volume):
         if not self._p300.has_tip:
@@ -281,16 +241,18 @@ class BioerMastermixPrep(Station):
 
     def fill_controls(self):
 
-        self.logger.info("Filling controls in {}".format(self.control_dests))
+        if len(self.control_wells_not_in_samples) > 0:
+            self.logger.info("Filling controls in {}".format(self.control_wells_not_in_samples))
+            if not self._p300.has_tip:
+                self.pick_up(self._p300)
 
-        if not self._p300.has_tip:
-            self.pick_up(self._p300)
+            vol = self._mastermix_vol * len(self.control_wells_not_in_samples)
+            self.aspirate_from_tubes(vol, self._p300)
 
-        vol = self._mastermix_vol * len(self.control_dests)
-        self.aspirate_from_tubes(vol, self._p300)
-
-        for w in self.control_dests:
-            self._p300.dispense(self._mastermix_vol, w.bottom(self._pcr_bottom_headroom_height))
+            for w in self.control_dests_wells:
+                self._p300.dispense(self._mastermix_vol, w.bottom(self._pcr_bottom_headroom_height))
+        else:
+            self.logger.info("Not filling controls: they will be filled with 8 channel pipette..")
 
     def aspirate_from_tubes(self, volume, pip):
         aspirate_list = []
@@ -339,7 +301,62 @@ class BioerMastermixPrep(Station):
         self._done_cols += to_do
         return samples_to_do
 
+    def body(self):
+        self.logger.info("Protocol for preparing Bioer mastermix plate.")
+        self.logger.info("=============================================\n")
+        self.logger.info("Samples: {}".format(self._num_samples))
 
+        volume_for_controls = len(self.control_wells_not_in_samples) * self._mastermix_vol
+        volume_to_distribute_to_pcr_plate = self._mastermix_vol * self.num_cols * 8 + volume_for_controls
+        volume_to_distribute_to_strip = volume_to_distribute_to_pcr_plate * self.headroom_from_strip_to_pcr
+        total_volume = volume_to_distribute_to_pcr_plate * self.headroom_from_tubes_to_strip
+
+        self.logger.info("For this run we need a total of {}ul of mastermix".format(total_volume))
+        self.logger.info("{}ul will be dispensed to strips".format(volume_to_distribute_to_strip))
+        self.logger.info("{}ul will be dispensed to control positions.".format(volume_for_controls))
+
+        num_tubes, vol_per_tube = uniform_divide(total_volume, self._tube_max_volume)
+        self.logger.info("We need {} tubes with {}ul of mastermix each.".format(num_tubes, vol_per_tube))
+
+        mm_tubes = self._tube_block.wells()[:num_tubes]
+
+        samples_per_mm_tube = []
+        for i in range(num_tubes):
+            remaining_samples = self._num_samples - sum(samples_per_mm_tube)
+            self.logger.info("Remaining samples: {}".format(remaining_samples))
+            samples_per_mm_tube.append(
+                min(8 * math.ceil(remaining_samples / (8 * (num_tubes - i))), remaining_samples))
+            self.logger.info("samples_per_mm_tube: {}".format(samples_per_mm_tube))
+
+        for (t, v) in zip(mm_tubes, samples_per_mm_tube):
+            self.logger.info("Load {} tube with {}ul; used for {} samples".format(t, vol_per_tube, v))
+
+        self._source_tubes_and_vol = []
+
+        for source in mm_tubes:
+            available_volume = volume_to_distribute_to_strip / len(mm_tubes)
+            assert total_volume > available_volume, \
+                "Error in volume calcuations: requested {}ul while total in tubes {}ul".format(available_volume,
+                                                                                          vol_per_tube)
+            self._source_tubes_and_vol.append(dict(source=source,
+                                                   available_volume=available_volume))
+
+        self.fill_controls()
+        while self.remaining_cols > 0:
+            # calcuations for filling strip each time
+            self.logger.info("\nRemaining cols: {}".format(self.remaining_cols))
+            strip_volume = min(self._mm_strips_capacity,
+                               self.remaining_cols * self._mastermix_vol * self.headroom_from_strip_to_pcr)
+            samples_per_this_strip = strip_volume // (self._mastermix_vol * self.headroom_from_strip_to_pcr)
+            self.logger.info("using that strip for {} samples".format(samples_per_this_strip))
+
+            strip_fill_volume = samples_per_this_strip * self._mastermix_vol * self.headroom_from_strip_to_pcr
+            self.logger.info("Filling strip with {}ul".format(strip_fill_volume))
+
+            self.fill_strip(strip_fill_volume)
+            self.transfer_to_pcr_plate_and_mark_done(samples_per_this_strip)
+
+        print("Remaining vols: {}".format(self._source_tubes_and_vol))
 
 if __name__ == "__main__":
-    BioerMastermixPrep(num_samples=96, metadata={'apiLevel': '2.3'}).simulate()
+    BioerMastermixPrep(num_samples=10, metadata={'apiLevel': '2.3'}).simulate()
