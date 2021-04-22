@@ -350,7 +350,7 @@ arguments = dict(mastermix_vol_headroom=1.1,
 # =====================================
 logging.getLogger(BioerMastermixPrep.__name__).setLevel(logging.INFO)
 metadata = {'apiLevel': '2.7'}
-station = BioerMastermixPrep(num_samples=96)
+station = BioerMastermixPrep(**arguments)
 
 
 def run(ctx):
@@ -360,4 +360,4 @@ def run(ctx):
 # for running directly with python command 'py Mastermix_prep_stations.py"
 # ========================================================================
 if __name__ == "__main__":
-    BioerMastermixPrep(num_samples=96, metadata={'apiLevel': '2.7'}).simulate()
+    BioerMastermixPrep(**arguments, metadata={'apiLevel': '2.7'}).simulate()
