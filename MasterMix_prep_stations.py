@@ -189,28 +189,15 @@ class BioerMastermixPrep(Station):
 
     @property
     def headroom_from_strip_to_pcr(self):
-        print("headroom strip-pcr: {}".format(((self._mastermix_vol_headroom - 1.0) / 2) + 1.0))
         return ((self._mastermix_vol_headroom - 1.0) / 2) + 1.0
 
     @property
     def headroom_from_tubes_to_strip(self):
-        print("Headroom tubes-strip: {}".format( self._mastermix_vol_headroom))
         return self._mastermix_vol_headroom
 
     @property
     def control_dests_wells(self):
         return [self._pcr_plate.wells_by_name()[i] for i in [self._positive_control_well, self._negative_control_well]]  # controlli in posizione A12 e H12
-
-    @property
-    def controls_already_done(self) -> bool:
-        print("Checking controls if already done")
-        r = self.sample_dests_wells
-
-        ret = True
-        for c in self.control_dests_wells:
-            print(c)
-            print(ret)
-        return True
 
     def is_well_in_samples(self, well):
         """
@@ -258,12 +245,8 @@ class BioerMastermixPrep(Station):
         aspirate_list = []
         left_volume = volume
         for source_and_vol in self._source_tubes_and_vol:
-            print("source now: {}".format(source_and_vol))
-            print("left volume: {}".format(left_volume))
-            aspirate_vol = 0
             if source_and_vol["available_volume"] >= left_volume:
                 # aspirate_list.append(dict(source=source_and_vol["source"], vol=left_volume))
-                print("Greater")
                 aspirate_vol = left_volume
             else:
                 aspirate_vol = source_and_vol["available_volume"]
@@ -271,8 +254,6 @@ class BioerMastermixPrep(Station):
             source_and_vol["available_volume"] -= aspirate_vol
             if aspirate_vol != 0:
                 aspirate_list.append(dict(source=source_and_vol["source"], vol=aspirate_vol))
-            print("aspirate list: {}".format(aspirate_list))
-            print("left volume: {}".format(left_volume))
 
             if left_volume == 0:
                 break
@@ -282,8 +263,9 @@ class BioerMastermixPrep(Station):
         for a in aspirate_list:
             pip.aspirate(a["vol"], a["source"].bottom(self._tube_bottom_headroom_height))
 
-    def transfer_to_pcr_plate_and_mark_done(self, num_columns):
-        self.logger.info("Transferring to pcr place {} columns.".format(num_columns))
+    def transfer_to_pcr_plate_and_mark_done(self, num_columns: int):
+        num_columns = int(num_columns)
+        self.logger.info("Transferring to pcr place {:d} columns.".format(num_columns))
         for s in self.get_next_pcr_plate_dests(num_columns):
             self.pick_up(self._m20)
             self._m20.transfer(self._mastermix_vol,
@@ -307,56 +289,66 @@ class BioerMastermixPrep(Station):
         self.logger.info("Samples: {}".format(self._num_samples))
 
         volume_for_controls = len(self.control_wells_not_in_samples) * self._mastermix_vol
+        self.logger.info("{}ul will be dispensed to control positions.".format(volume_for_controls))
+
         volume_to_distribute_to_pcr_plate = self._mastermix_vol * self.num_cols * 8 + volume_for_controls
         volume_to_distribute_to_strip = volume_to_distribute_to_pcr_plate * self.headroom_from_strip_to_pcr
-        total_volume = volume_to_distribute_to_pcr_plate * self.headroom_from_tubes_to_strip
-
-        self.logger.info("For this run we need a total of {}ul of mastermix".format(total_volume))
         self.logger.info("{}ul will be dispensed to strips".format(volume_to_distribute_to_strip))
-        self.logger.info("{}ul will be dispensed to control positions.".format(volume_for_controls))
+
+        total_volume = volume_to_distribute_to_pcr_plate * self.headroom_from_tubes_to_strip
+        self.logger.info("For this run we need a total of {}ul of mastermix".format(total_volume))
 
         num_tubes, vol_per_tube = uniform_divide(total_volume, self._tube_max_volume)
         self.logger.info("We need {} tubes with {}ul of mastermix each.".format(num_tubes, vol_per_tube))
 
         mm_tubes = self._tube_block.wells()[:num_tubes]
 
-        samples_per_mm_tube = []
-        for i in range(num_tubes):
-            remaining_samples = self._num_samples - sum(samples_per_mm_tube)
-            self.logger.info("Remaining samples: {}".format(remaining_samples))
-            samples_per_mm_tube.append(
-                min(8 * math.ceil(remaining_samples / (8 * (num_tubes - i))), remaining_samples))
-            self.logger.info("samples_per_mm_tube: {}".format(samples_per_mm_tube))
-
-        for (t, v) in zip(mm_tubes, samples_per_mm_tube):
-            self.logger.info("Load {} tube with {}ul; used for {} samples".format(t, vol_per_tube, v))
-
+        # Filling source class to calculate where to aspirate
         self._source_tubes_and_vol = []
-
         for source in mm_tubes:
             available_volume = volume_to_distribute_to_strip / len(mm_tubes)
-            assert total_volume > available_volume, \
+            assert vol_per_tube > available_volume, \
                 "Error in volume calcuations: requested {}ul while total in tubes {}ul".format(available_volume,
                                                                                           vol_per_tube)
             self._source_tubes_and_vol.append(dict(source=source,
                                                    available_volume=available_volume))
 
+        # First fill controls
         self.fill_controls()
+        # Mail loop filling the plate
         while self.remaining_cols > 0:
             # calcuations for filling strip each time
             self.logger.info("\nRemaining cols: {}".format(self.remaining_cols))
             strip_volume = min(self._mm_strips_capacity,
                                self.remaining_cols * self._mastermix_vol * self.headroom_from_strip_to_pcr)
+
             samples_per_this_strip = strip_volume // (self._mastermix_vol * self.headroom_from_strip_to_pcr)
             self.logger.info("using that strip for {} samples".format(samples_per_this_strip))
 
             strip_fill_volume = samples_per_this_strip * self._mastermix_vol * self.headroom_from_strip_to_pcr
             self.logger.info("Filling strip with {}ul".format(strip_fill_volume))
-
             self.fill_strip(strip_fill_volume)
+
             self.transfer_to_pcr_plate_and_mark_done(samples_per_this_strip)
 
-        print("Remaining vols: {}".format(self._source_tubes_and_vol))
+        if self._p300.has_tip:
+            self.drop(self._p300)
 
+        self.logger.debug("Remaining vols: {}".format(self._source_tubes_and_vol))
+
+
+# protocol for loading in Opentrons App or opentrons_simulate
+# =====================================
+logging.getLogger(BioerMastermixPrep.__name__).setLevel(logging.INFO)
+metadata = {'apiLevel': '2.7'}
+station = BioerMastermixPrep(num_samples=96)
+
+
+def run(ctx):
+    return station.run(ctx)
+
+
+# for running directly with python command 'py Mastermix_prep_stations.py"
+# ========================================================================
 if __name__ == "__main__":
-    BioerMastermixPrep(num_samples=10, metadata={'apiLevel': '2.3'}).simulate()
+    BioerMastermixPrep(num_samples=96, metadata={'apiLevel': '2.7'}).simulate()
