@@ -12,9 +12,9 @@ class BioerMastermixPrep(Station):
 
     def __init__(self,
             aspirate_rate: float = 30,
-            tube_bottom_headroom_height: float = 3,
-            strip_bottom_headroom_height: float = 3.5,
-            pcr_bottom_headroom_height: float = 3.5,
+            tube_bottom_headroom_height: float = 2,
+            strip_bottom_headroom_height: float = 4.0,
+            pcr_bottom_headroom_height: float = 4.5,
             dispense_rate: float = 30,
             drop_loc_l: float = 0,
             drop_loc_r: float = 0,
@@ -43,7 +43,7 @@ class BioerMastermixPrep(Station):
             tempdeck_bool: bool = True,
             tipracks_slots: Tuple[str, ...] = ('2', '3', '5', '6', '8', '9', '11'),
             transfer_samples: bool = True,
-            tube_block_model: str = "opentrons_24_aluminumblock_nest_1.5ml_snapcap",
+            tube_block_model: str = "opentrons_24_aluminumblock_nest_1.5ml_screwcap",
             tube_max_volume: float = 1500,
             ** kwargs
 
@@ -225,6 +225,8 @@ class BioerMastermixPrep(Station):
             self.aspirate_from_tubes(volume, self._p300)
             self._p300.dispense(volume, well.bottom(self._strip_bottom_headroom_height))
 
+        self.drop(self._p300)
+
 
     def fill_controls(self):
 
@@ -272,7 +274,7 @@ class BioerMastermixPrep(Station):
                                self.mm_strip[0].bottom(self._strip_bottom_headroom_height),
                                s.bottom(self._pcr_bottom_headroom_height),
                                new_tip='never')
-            self._m20.drop_tip()
+            self.drop(self._m20)
 
     def get_next_pcr_plate_dests(self, num_columns: int):
         if self._done_cols < self.num_cols:
@@ -287,6 +289,8 @@ class BioerMastermixPrep(Station):
         self.logger.info("Protocol for preparing Bioer mastermix plate.")
         self.logger.info("=============================================\n")
         self.logger.info("Samples: {}".format(self._num_samples))
+
+        self.logger.info("\nIn this run we use a volume overhead of: {}".format(self._mastermix_vol_headroom))
 
         volume_for_controls = len(self.control_wells_not_in_samples) * self._mastermix_vol
         self.logger.info("{}ul will be dispensed to control positions.".format(volume_for_controls))
@@ -336,6 +340,11 @@ class BioerMastermixPrep(Station):
 
         self.logger.debug("Remaining vols: {}".format(self._source_tubes_and_vol))
 
+    def drop(self, pip):
+        pip.return_tip()
+
+arguments = dict(mastermix_vol_headroom=1.1,
+              num_samples=72)
 
 # protocol for loading in Opentrons App or opentrons_simulate
 # =====================================
