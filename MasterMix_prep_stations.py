@@ -23,27 +23,15 @@ class BioerMastermixPrep(Station):
             logger: Optional[logging.getLoggerClass()] = None,
             mastermix_vol: float = 20,
             mastermix_vol_headroom: float = 100,
-            mastermix_vol_headroom_aspirate: float = 20 / 18,
             mastermix_headroom_part_in_strip: float = 0.7,
             mm_strip_capacity: float = 180,
             metadata: Optional[dict] = None,
             num_samples: int = 96,
-            positive_control_well: str = 'H12',
-            negative_control_well: str = 'A12',
-            sample_blow_height: float = -2,
-            sample_bottom_height: float = 2,
-            sample_mix_vol: float = 10,
-            sample_mix_reps: int = 1,
-            sample_vol: float = 8,
+            control_well_positions = ['A12', 'H12'],
             samples_per_col: int = 8,
-            samples_per_cycle: int = 96,
             skip_delay: bool = False,
-            source_plate_name: str = 'chilled elution plate on block from Station B',
-            suck_height: float = 2,
-            suck_vol: float = 5,
-            tempdeck_bool: bool = True,
+            source_plate_name: str = 'Clean PCR plate on block ',
             tipracks_slots: Tuple[str, ...] = ('2', '3', '5', '6', '8', '9', '11'),
-            transfer_samples: bool = True,
             tube_block_model: str = "opentrons_24_aluminumblock_nest_1.5ml_screwcap",
             tube_max_volume: float = 1800,
             ** kwargs
@@ -61,22 +49,12 @@ class BioerMastermixPrep(Station):
         :param logger: logger object. If not specified, the default logger is used that logs through the ProtocolContext comment method
         :param mastermix_vol: Mastermix volume per sample in uL
         :param mastermix_vol_headroom: Headroom for mastermix preparation volume to add to needed volume
-        :param mastermix_vol_headroom_aspirate: Headroom for mastermix aspiration volume as a divisor
         :param metadata: protocol metadata
         :param num_samples: The number of samples that will be loaded on the station B
-        :param positive_control_well: Position of the positive control well
-        :param sample_blow_height: Height from the top when blowing out in mm (should be negative)
-        :param sample_bottom_height: Height to keep from the bottom in mm when dealing with samples
-        :param sample_mix_vol: Samples mixing volume in uL
-        :param sample_mix_reps: Samples mixing repetitions
-        :param sample_vol: Sample volume
+        :param control_well_positions: Position of the control wells to be filled with mastermix
         :param samples_per_col: The number of samples in a column of the destination plate
-        :param samples_per_cycle: The number of samples processable in one cycle
         :param source_plate_name: Name for the source plate
         :param skip_delay: If True, pause instead of delay.
-        :param suck_height: Height from the top when sucking in any remaining droplets on way to trash in mm
-        :param suck_vol: Volume for sucking in any remaining droplets on way to trash in uL
-        :param transfer_samples: Whether to transfer samples or not
         :param tube_block_model: Tube block model name
         """
         super(BioerMastermixPrep, self).__init__(
@@ -99,38 +77,20 @@ class BioerMastermixPrep(Station):
         self._dispense_rate = dispense_rate
         self._mastermix_vol = mastermix_vol
         self._mastermix_vol_headroom = mastermix_vol_headroom
-        self._mastermix_vol_headroom_aspirate = mastermix_vol_headroom_aspirate
 
         assert 0 <= mastermix_headroom_part_in_strip <= 1, \
             "Mastermix headroom in strip part must be between or equal to 0 and 1"
         self._mastermix_headroom_part_in_strip = mastermix_headroom_part_in_strip
 
         self._mm_strips_capacity = mm_strip_capacity
-        self._positive_control_well = positive_control_well
-        self._negative_control_well = negative_control_well
-        self._sample_blow_height = sample_blow_height
-        self._sample_bottom_height = sample_bottom_height
-        self._sample_mix_vol = sample_mix_vol
-        self._sample_mix_reps = sample_mix_reps
-        self._sample_vol = sample_vol
-        self._samples_per_cycle = int(math.ceil(samples_per_cycle / 8) * 8)
+        self._control_well_positions = control_well_positions
         self._source_plate_name = source_plate_name
-        self._suck_height = suck_height
-        self._suck_vol = suck_vol
-        self._tempdeck_bool = tempdeck_bool
         self._tipracks_slots = tipracks_slots
-        self._transfer_samples = transfer_samples
         self._tube_block_model = tube_block_model
         self._tube_max_volume = tube_max_volume
 
         self._remaining_samples = self._num_samples
-        self._samples_this_cycle = min(self._remaining_samples, self._samples_per_cycle)
         self._done_cols: int = 0
-
-
-    @property
-    def num_cycles(self) -> int:
-        return int(math.ceil(self._num_samples / self._samples_per_cycle))
 
     @labware_loader(1, "_tips20")
     def load_tips20(self):
@@ -214,7 +174,7 @@ class BioerMastermixPrep(Station):
 
     @property
     def control_dests_wells(self):
-        return [self._pcr_plate.wells_by_name()[i] for i in [self._positive_control_well, self._negative_control_well]]  # controlli in posizione A12 e H12
+        return [self._pcr_plate.wells_by_name()[i] for i in self._control_well_positions]  # controlli in posizione A12 e H12
 
     def is_well_in_samples(self, well):
         """
